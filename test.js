@@ -1,0 +1,1 @@
+console.log("david is cool but ali is cooler!");
