@@ -12,7 +12,6 @@ import { Separator } from "@/components/ui/separator"
 import { toast } from "@/hooks/use-toast"
 import { SimpleWalletConnect } from "./simple-wallet-connect"
 
-// Replace this with your deployed contract address
 const GUESTBOOK_CONTRACT = "0xf38dc33B61AA315F38b685AC145e64FE0d2D4cc4"
 
 const GUESTBOOK_ABI = [
@@ -47,6 +46,7 @@ interface GuestbookEntry {
   eventId: string
   message: string
   timestamp: string
+  ensName: string
 }
 
 export default function GuestbookApp() {
@@ -66,31 +66,45 @@ export default function GuestbookApp() {
       const guestBook = new ethers.Contract(GUESTBOOK_CONTRACT, GUESTBOOK_ABI, provider)
       const filter = guestBook.filters.MessageSigned()
       const logs = await guestBook.queryFilter(filter, 0, "latest")
-
-      const mapped = logs.map((log: any) => {
-        const { signer, message, timestamp } = log.args
-        let parsed = { name: "Anonymous", eventId: "N/A", message }
-
-        try {
-          parsed = JSON.parse(message)
-        } catch (err) {
-          // Fallback to raw message
-        }
-
-        return {
-          signer,
-          name: parsed.name || "Anonymous",
-          eventId: parsed.eventId || "N/A",
-          message: parsed.message || message,
-          timestamp: new Date(Number(timestamp) * 1000).toLocaleString(),
-        }
-      })
-
+  
+      const ensCache = new Map<string, string>() // cache: signer address -> ens/display name
+  
+      const mapped = await Promise.all(
+        logs.map(async (log: any) => {
+          const {  message, timestamp } = log.args
+          const signer = '0x179A862703a4adfb29896552DF9e307980D19285';
+          let parsed = { name: "Anonymous", eventId: "N/A", message }
+  
+          try {
+            parsed = JSON.parse(message)
+          } catch (err) {
+            // fallback to raw message
+          }
+  
+          let displayName = ensCache.get(signer)
+          if (!displayName) {
+            const ensName = await provider.lookupAddress(signer)
+            displayName = ensName || formatAddress(signer)
+            ensCache.set(signer, displayName)
+          }
+  
+          return {
+            signer,
+            name: parsed.name || "Anonymous",
+            eventId: parsed.eventId || "N/A",
+            message: parsed.message || message,
+            timestamp: new Date(Number(timestamp) * 1000).toLocaleString(),
+            ensName: displayName,
+          }
+        })
+      )
+  
       setEntries(mapped.reverse())
     } catch (err) {
       console.error("Error fetching messages:", err)
     }
   }
+  
 
   const handleWalletChange = (newWallet: WalletState) => {
     setWallet(newWallet)
@@ -255,7 +269,7 @@ export default function GuestbookApp() {
                       <div className="flex justify-between">
                         <div className="flex items-center gap-2">
                           <Badge variant="outline" className="font-mono text-xs">
-                            {formatAddress(entry.signer)}
+                            {entry.ensName}
                           </Badge>
                           <span className="text-sm text-gray-500">{entry.timestamp}</span>
                         </div>
